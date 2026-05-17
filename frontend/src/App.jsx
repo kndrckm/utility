@@ -274,7 +274,6 @@ export default function App() {
           const url = URL.createObjectURL(blob);
           setPdfUrl(url);
           setFile(f);
-          setStep(2);
       };
       reader.readAsArrayBuffer(f);
   };
@@ -2228,9 +2227,13 @@ export default function App() {
                       className="hidden" 
                     />
                     <span className="bg-[var(--color-neo-lime)] text-black text-sm font-bold font-[Inter] uppercase px-6 py-3 brutal-btn">
-                      Select PDF File
+                      {file ? "Change PDF File" : "Select PDF File"}
                     </span>
-                    <span className="text-[10px] text-[var(--color-neo-white)] mt-4 font-[Inter] uppercase tracking-wider font-bold">or drag & drop drawing here</span>
+                    {file ? (
+                        <span className="text-[10px] text-[var(--color-neo-lime)] mt-4 font-[Inter] uppercase tracking-wider font-bold truncate w-full text-center px-4" title={file.name}>Selected: {file.name}</span>
+                    ) : (
+                        <span className="text-[10px] text-[var(--color-neo-white)] mt-4 font-[Inter] uppercase tracking-wider font-bold">or drag & drop drawing here</span>
+                    )}
                   </label>
 
                   <div className="w-full max-w-md space-y-3 p-5 brutal-border bg-[var(--color-neo-bg)]">
@@ -2257,6 +2260,15 @@ export default function App() {
                       Allows saving split pages directly to your computer's folders without zip file extraction.
                     </p>
                   </div>
+
+                  {file && (
+                    <button 
+                      onClick={() => setStep(2)} 
+                      className="w-full max-w-md bg-[var(--color-neo-lime)] hover:bg-white text-black font-black font-[Montserrat] uppercase tracking-widest py-4 px-6 brutal-btn brutal-shadow-hover text-sm transition-all"
+                    >
+                      Proceed to Select Pages
+                    </button>
+                  )}
                 </div>
               )}
 
