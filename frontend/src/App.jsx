@@ -42,17 +42,16 @@ const LazyPage = ({ pageIndex, isSelected, onClick, pdfUrl, width = 150 }) => {
         <div 
             ref={containerRef} 
             onClick={() => onClick && onClick(pageIndex)} 
-            className={`relative ${onClick ? 'cursor-pointer' : ''} rounded-xl overflow-hidden border-2 transition-all duration-300 bg-white ${
+            className={`relative ${onClick ? 'cursor-pointer' : ''} bg-white flex flex-col overflow-hidden will-change-transform ${
                 isSelected 
-                    ? 'border-slate-800 shadow-[0_0_10px_rgba(0,0,0,0.06)] scale-[0.98]' 
-                    : 'border-slate-200 hover:border-slate-350 opacity-90'
+                    ? 'border-[4px] border-[var(--color-neo-purple)] shadow-[4px_4px_0px_0px_var(--color-black)] z-10 transition-[transform,box-shadow,border-color,opacity] duration-150 scale-100 opacity-100' 
+                    : 'border-[2px] border-[var(--color-neo-surface)] transition-[transform,box-shadow,border-color,opacity] duration-150 opacity-40 scale-[0.80] hover:scale-[0.85] hover:opacity-75'
             }`}
         >
             {isVisible && pdfUrl ? (
                 <Page 
                     pageNumber={pageIndex + 1} 
-                    width={width * 2} 
-                    style={{ width: '100%', height: 'auto' }} 
+                    width={width} 
                     renderTextLayer={false} 
                     renderAnnotationLayer={false} 
                     loading={<div className="flex items-center justify-center text-[10px] text-slate-400 animate-pulse" style={{ width, height: width * 1.41 }}>...</div>} 
@@ -62,7 +61,7 @@ const LazyPage = ({ pageIndex, isSelected, onClick, pdfUrl, width = 150 }) => {
                     P. {pageIndex + 1}
                 </div>
             )}
-            <div className="absolute bottom-0 left-0 right-0 bg-slate-900/90 text-center text-[9px] py-1 font-mono text-slate-200">P. {pageIndex + 1}</div>
+            <div className={`absolute bottom-0 left-0 right-0 text-center text-[10px] py-1 font-black font-[Montserrat] uppercase tracking-widest ${isSelected ? 'bg-[var(--color-neo-purple)] text-black border-t-4 border-black' : 'bg-[var(--color-neo-surface)] text-[var(--color-neo-white)] border-t-2 border-[var(--color-neo-surface)]'}`}>P. {pageIndex + 1}</div>
         </div>
     );
 };
@@ -1440,8 +1439,8 @@ export default function App() {
               const b = pixels[idx + 2];
               const a = pixels[idx + 3];
               
-              // Visible drawing element if not transparent AND not pure white background
-              if (a > 10 && (r < 250 || g < 250 || b < 250)) {
+              // Visible drawing element if not fully transparent
+              if (a > 10) {
                   if (x < minX) minX = x;
                   if (x > maxX) maxX = x;
                   if (y < minY) minY = y;
@@ -1696,6 +1695,9 @@ export default function App() {
       
       if (!imageContainerRef.current) return;
       
+      // Do nothing if no tool is active
+      if (cropperToolMode === 'none') return;
+      
       // If Magic Wand mode is active, handle clicks inside target area instead of box dragging
       if (cropperToolMode === 'wand') {
           handleMagicWandClick(e);
@@ -1817,6 +1819,18 @@ export default function App() {
   const handleCropperMouseUp = () => {
       setCropperIsDragging(false);
       setCropperDragHandle(null);
+  };
+
+  const handleCropperNewProject = () => {
+      if (window.confirm("Are you sure? This will remove all current unsaved files and start a new project.")) {
+          setCropperInputDirHandle(null);
+          setCropperFilesList([]);
+          setCropperFile(null);
+          if (cropperImageUrl) URL.revokeObjectURL(cropperImageUrl);
+          setCropperImageUrl('');
+          setCropperHistory([]);
+          setCropperHistoryIndex(-1);
+      }
   };
 
   const handleCropperReset = () => {
@@ -2049,110 +2063,140 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[var(--color-neo-bg)] text-[var(--color-neo-white)] font-sans select-none overflow-hidden h-screen flex w-full">
-      {/* 🧭 PREMIUM LEFT SIDEBAR */}
-      <aside className="w-72 bg-[var(--color-neo-surface)] brutal-border border-l-0 border-t-0 border-b-0 flex flex-col shrink-0 z-50">
-        <div className="p-8 brutal-border border-l-0 border-t-0 border-r-0 flex flex-col items-center">
-          <svg width="64" height="64" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" className="mb-4">
-            <rect x="10" y="10" width="80" height="80" fill="var(--color-neo-purple)" stroke="black" strokeWidth="6" />
-            <path d="M30 30V55C30 65 35 70 50 70C65 70 70 65 70 55V30H55V55C55 58 53 60 50 60C47 60 45 58 45 55V30H30Z" fill="white" stroke="black" strokeWidth="4"/>
-            <rect x="15" y="15" width="80" height="80" fill="none" stroke="black" strokeWidth="2" transform="translate(4, 4)" />
-          </svg>
-          <h1 className="text-xl font-black text-white tracking-tighter uppercase font-[Montserrat]">PDF Studio</h1>
+      {/* 🧭 PREMIUM COLLAPSIBLE LEFT SIDEBAR */}
+      <aside className="w-20 hover:w-72 bg-[var(--color-neo-surface)] brutal-border border-l-0 border-t-0 border-b-0 flex flex-col shrink-0 z-50 transition-all duration-300 ease-in-out group overflow-hidden">
+        <div className="h-[76px] px-[10px] brutal-border border-l-0 border-t-0 border-r-0 flex items-center transition-all duration-300 ease-in-out shrink-0">
+          <div className="w-[56px] h-[56px] flex items-center justify-center shrink-0">
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 shrink-0">
+              <rect x="10" y="10" width="80" height="80" fill="var(--color-neo-purple)" stroke="var(--color-black)" strokeWidth="6" />
+              <path d="M30 30V55C30 65 35 70 50 70C65 70 70 65 70 55V30H55V55C55 58 53 60 50 60C47 60 45 58 45 55V30H30Z" fill="white" stroke="var(--color-black)" strokeWidth="4"/>
+              <rect x="15" y="15" width="80" height="80" fill="none" stroke="var(--color-black)" strokeWidth="2" transform="translate(4, 4)" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-black text-white tracking-tighter uppercase font-[Montserrat] max-w-0 group-hover:max-w-xs opacity-0 group-hover:opacity-100 transition-all duration-300 overflow-hidden whitespace-nowrap pl-0 group-hover:pl-4">PDF Studio</h1>
         </div>
         
         {/* Navigation Tabs */}
-        <div className="flex-1 px-6 py-6 space-y-4">
+        <div className="flex-1 px-[10px] py-6 space-y-4 transition-all duration-300 ease-in-out">
           <button 
             onClick={() => setActiveTab('splitter')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'splitter' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-scissors text-sm"></i>
-            <span>PDF Splitter</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-scissors text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              PDF Splitter
+            </span>
           </button>
 
           <button 
             onClick={() => setActiveTab('converter')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'converter' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-card-image text-sm"></i>
-            <span>PDF to Image</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-card-image text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              PDF to Image
+            </span>
           </button>
 
           <button 
             onClick={() => setActiveTab('cropper')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'cropper' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-crop text-sm"></i>
-            <span>Image Cropper</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-crop text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              Image Cropper
+            </span>
           </button>
           
           <button 
             onClick={() => setActiveTab('merger')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'merger' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-plus-square text-sm"></i>
-            <span>Visual Drawer Merger</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-plus-square text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              Visual Drawer Merger
+            </span>
           </button>
           
           <button 
             onClick={() => setActiveTab('rotator')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'rotator' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-arrow-clockwise text-sm"></i>
-            <span>Visual Sheet Rotator</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-arrow-clockwise text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              Visual Sheet Rotator
+            </span>
           </button>
           
           <button 
             onClick={() => setActiveTab('watermark')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'watermark' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-shield-check text-sm"></i>
-            <span>Blueprint Watermarker</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-shield-check text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              Blueprint Watermarker
+            </span>
           </button>
           
           <button 
             onClick={() => setActiveTab('extractor')}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold font-[Inter] uppercase tracking-wide transition-all ${
+            className={`w-full h-14 flex items-center transition-all ${
               activeTab === 'extractor' 
                 ? 'bg-[var(--color-neo-purple)] text-black brutal-border brutal-shadow' 
                 : 'hover:bg-white hover:text-black text-[var(--color-neo-white)] brutal-border border-transparent hover:border-black'
             }`}
           >
-            <i className="bi bi-images text-sm"></i>
-            <span>Image Detail Extractor</span>
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+              <i className="bi bi-images text-base"></i>
+            </div>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap font-bold font-[Inter] uppercase tracking-wide text-xs">
+              Image Detail Extractor
+            </span>
           </button>
         </div>
         
         {/* Sidebar Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-between text-[9px] font-mono text-slate-500">
-          <span>v1.2.0</span>
-          <span className="text-emerald-500 flex items-center gap-1 font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            100% Offline
+        <div className="p-4 border-t border-slate-800 flex items-center justify-center group-hover:justify-between text-[9px] font-mono text-slate-500 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap">
+          <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden">v1.2.0</span>
+          <span className="text-emerald-500 flex items-center gap-1 font-semibold shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+            <span className="opacity-0 group-hover:opacity-100 max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden">100% Offline</span>
           </span>
         </div>
       </aside>
@@ -2342,6 +2386,26 @@ export default function App() {
                     {/* Divider */}
                     <div className="w-1 h-8 bg-black" />
 
+                    {/* Page nav */}
+                    <div className="flex items-center gap-3 bg-[var(--color-neo-bg)] px-4 h-9 border-2 border-black shadow-[2px_2px_0px_0px_var(--color-black)]">
+                      <button
+                        onClick={() => { const i = pagesToKeep.indexOf(previewPageIndex); if(i > 0) setPreviewPageIndex(pagesToKeep[i-1]); }}
+                        disabled={pagesToKeep.indexOf(previewPageIndex) <= 0}
+                        className="text-[var(--color-neo-white)] hover:text-white disabled:opacity-30 font-black text-xs"
+                      >◀</button>
+                      <span className="text-[10px] font-black font-[Montserrat] text-[var(--color-neo-lime)] uppercase tracking-wider">
+                        {previewPageIndex + 1} / {pagesToKeep.length}
+                      </span>
+                      <button
+                        onClick={() => { const i = pagesToKeep.indexOf(previewPageIndex); if(i < pagesToKeep.length-1) setPreviewPageIndex(pagesToKeep[i+1]); }}
+                        disabled={pagesToKeep.indexOf(previewPageIndex) >= pagesToKeep.length-1}
+                        className="text-[var(--color-neo-white)] hover:text-white disabled:opacity-30 font-black text-xs"
+                      >▶</button>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="w-1 h-8 bg-black" />
+
                     {/* Zoom controls */}
                     <div className="flex items-center gap-2">
                       <button onClick={() => setScale(p => Math.min(5, p + 0.2))} className="w-9 h-9 bg-white hover:bg-[var(--color-neo-lime)] border-2 border-black text-sm flex items-center justify-center font-black brutal-shadow-hover text-black">+</button>
@@ -2445,22 +2509,6 @@ export default function App() {
                       </ReactCrop>
                     </div>
 
-                    {/* Page nav */}
-                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-white/90 backdrop-blur px-4 py-1.5 rounded-full border border-slate-200 shadow-sm">
-                      <button
-                        onClick={() => { const i = pagesToKeep.indexOf(previewPageIndex); if(i > 0) setPreviewPageIndex(pagesToKeep[i-1]); }}
-                        disabled={pagesToKeep.indexOf(previewPageIndex) <= 0}
-                        className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs"
-                      >◀</button>
-                      <span className="text-[9px] font-mono text-slate-600">
-                        {previewPageIndex + 1} / {pagesToKeep.length}
-                      </span>
-                      <button
-                        onClick={() => { const i = pagesToKeep.indexOf(previewPageIndex); if(i < pagesToKeep.length-1) setPreviewPageIndex(pagesToKeep[i+1]); }}
-                        disabled={pagesToKeep.indexOf(previewPageIndex) >= pagesToKeep.length-1}
-                        className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs"
-                      >▶</button>
-                    </div>
                   </div>
                 </div>
               )}
@@ -3650,22 +3698,12 @@ export default function App() {
               )}
 
               {/* Center Column: Visual Creative Canvas & Responsive Viewport */}
-              <div className="flex-1 bg-[var(--color-neo-surface)] brutal-border flex flex-col overflow-hidden mx-6 my-6 brutal-shadow">
+              <div className="flex-1 flex flex-col overflow-hidden bg-[var(--color-neo-bg)] relative">
                 
                 {/* Visual Canvas Toolbar Header */}
-                <div className="p-4 brutal-border border-t-0 border-l-0 border-r-0 bg-[var(--color-neo-bg)] flex flex-wrap items-center justify-between gap-4 shrink-0">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-[var(--color-neo-purple)] brutal-border flex items-center justify-center text-black brutal-shadow">
-                      <i className={`bi ${cropperToolMode === 'wand' ? 'bi-magic' : 'bi-crop'} text-xl`}></i>
-                    </div>
-                    <div>
-                      <h4 className="text-lg font-black text-[var(--color-neo-white)] font-[Montserrat] uppercase tracking-tighter">CAD Drawing Studio</h4>
-                      <p className="text-[10px] text-[var(--color-neo-pink)] font-bold font-[Inter] uppercase tracking-wide">100% Client-Side WebGPU-Accelerated Pixels Editor</p>
-                    </div>
-                  </div>
-
+                <div className="p-4 bg-[var(--color-neo-surface)] border-b-4 border-black flex flex-wrap items-center justify-start gap-4 shrink-0 z-20">
                   {cropperFile && (
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4 w-full">
                       {/* Undo / Redo Group */}
                       <div className="flex gap-2">
                         <button
@@ -3729,7 +3767,7 @@ export default function App() {
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => setCropperToolMode('crop')}
+                          onClick={() => setCropperToolMode(m => m === 'crop' ? 'none' : 'crop')}
                           className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold font-[Inter] uppercase tracking-wider transition-all ${
                             cropperToolMode === 'crop'
                               ? 'bg-[var(--color-neo-purple)] text-black brutal-btn'
@@ -3741,7 +3779,7 @@ export default function App() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setCropperToolMode('wand')}
+                          onClick={() => setCropperToolMode(m => m === 'wand' ? 'none' : 'wand')}
                           className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold font-[Inter] uppercase tracking-wider transition-all ${
                             cropperToolMode === 'wand'
                               ? 'bg-[var(--color-neo-purple)] text-black brutal-btn'
@@ -3779,15 +3817,25 @@ export default function App() {
                         </button>
                       )}
 
-                      {/* Reset state buttons */}
-                      <button
-                        onClick={handleCropperReset}
-                        className="px-4 py-2 bg-red-400 text-black text-[10px] font-bold font-[Inter] uppercase tracking-wide brutal-btn brutal-shadow-hover flex items-center transition-all"
-                        title="Restore original un-edited image drawing"
-                      >
-                        <i className="bi bi-arrow-counterclockwise mr-2 text-sm"></i>
-                        Reset
-                      </button>
+                      {/* Reset & New Project buttons */}
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={handleCropperReset}
+                          className="px-4 py-2 bg-[var(--color-neo-pink)] text-black text-[10px] font-bold font-[Inter] uppercase tracking-wide brutal-btn brutal-shadow-hover flex items-center transition-all"
+                          title="Restore original un-edited image drawing"
+                        >
+                          <i className="bi bi-arrow-counterclockwise mr-2 text-sm"></i>
+                          Reset Image
+                        </button>
+                        <button
+                          onClick={handleCropperNewProject}
+                          className="px-4 py-2 bg-red-500 text-white text-[10px] font-bold font-[Inter] uppercase tracking-wide brutal-btn brutal-shadow-hover flex items-center transition-all"
+                          title="Start a new Cropper project (Clears all unsaved files)"
+                        >
+                          <i className="bi bi-folder-plus mr-2 text-sm"></i>
+                          New Project
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3899,41 +3947,41 @@ export default function App() {
                           return (
                             <>
                               {/* Overlay Mask Segments (outside crop box) */}
-                              <div className="absolute bg-slate-950/40 pointer-events-none" style={{ top: 0, left: 0, right: 0, height: top }} />
-                              <div className="absolute bg-slate-950/40 pointer-events-none" style={{ top: top + height, bottom: 0, left: 0, right: 0 }} />
-                              <div className="absolute bg-slate-950/40 pointer-events-none" style={{ top, bottom: displayH - top - height, left: 0, width: left }} />
-                              <div className="absolute bg-slate-950/40 pointer-events-none" style={{ top, bottom: displayH - top - height, right: 0, width: displayW - left - width }} />
+                              <div className="absolute bg-[var(--color-neo-bg)] opacity-80 pointer-events-none" style={{ top: 0, left: 0, right: 0, height: top }} />
+                              <div className="absolute bg-[var(--color-neo-bg)] opacity-80 pointer-events-none" style={{ top: top + height, bottom: 0, left: 0, right: 0 }} />
+                              <div className="absolute bg-[var(--color-neo-bg)] opacity-80 pointer-events-none" style={{ top, height, left: 0, width: left }} />
+                              <div className="absolute bg-[var(--color-neo-bg)] opacity-80 pointer-events-none" style={{ top, height, left: left + width, right: 0 }} />
 
                               {/* Crop Box Selector Border */}
                               <div 
-                                className="absolute border-2 border-dashed border-indigo-500 cursor-move shadow-inner"
+                                className="absolute border-[3px] border-dashed border-[var(--color-neo-pink)] cursor-move shadow-inner"
                                 style={{ left, top, width, height }}
                                 onMouseDown={(e) => handleCropperMouseDown(e, 'move')}
                               >
                                 {/* Corner Handles */}
                                 <div 
-                                  className="absolute w-3 h-3 bg-white border border-indigo-500 rounded-full cursor-nwse-resize shadow-xs" 
-                                  style={{ top: -6, left: -6 }}
+                                  className="absolute w-4 h-4 bg-[var(--color-neo-lime)] border-2 border-black cursor-nwse-resize shadow-xs" 
+                                  style={{ top: -8, left: -8 }}
                                   onMouseDown={(e) => handleCropperMouseDown(e, 'tl')}
                                 />
                                 <div 
-                                  className="absolute w-3 h-3 bg-white border border-indigo-500 rounded-full cursor-nesw-resize shadow-xs" 
-                                  style={{ top: -6, right: -6 }}
+                                  className="absolute w-4 h-4 bg-[var(--color-neo-lime)] border-2 border-black cursor-nesw-resize shadow-xs" 
+                                  style={{ top: -8, right: -8 }}
                                   onMouseDown={(e) => handleCropperMouseDown(e, 'tr')}
                                 />
                                 <div 
-                                  className="absolute w-3 h-3 bg-white border border-indigo-500 rounded-full cursor-nesw-resize shadow-xs" 
-                                  style={{ bottom: -6, left: -6 }}
+                                  className="absolute w-4 h-4 bg-[var(--color-neo-lime)] border-2 border-black cursor-nesw-resize shadow-xs" 
+                                  style={{ bottom: -8, left: -8 }}
                                   onMouseDown={(e) => handleCropperMouseDown(e, 'bl')}
                                 />
                                 <div 
-                                  className="absolute w-3 h-3 bg-white border border-indigo-500 rounded-full cursor-nwse-resize shadow-xs" 
-                                  style={{ bottom: -6, right: -6 }}
+                                  className="absolute w-4 h-4 bg-[var(--color-neo-lime)] border-2 border-black cursor-nwse-resize shadow-xs" 
+                                  style={{ bottom: -8, right: -8 }}
                                   onMouseDown={(e) => handleCropperMouseDown(e, 'br')}
                                 />
                                 
                                 {/* Overlay resolution tag inside cropbox */}
-                                <div className="absolute bottom-2 right-2 bg-indigo-650 text-white font-mono text-[8px] font-bold px-1.5 py-0.5 rounded shadow-2xs pointer-events-none select-none uppercase tracking-wider">
+                                <div className="absolute bottom-2 right-2 bg-black text-white font-mono text-[8px] font-bold px-2 py-1 shadow-2xs pointer-events-none select-none uppercase tracking-wider">
                                   {cropperCropBox.width} × {cropperCropBox.height} px
                                 </div>
                               </div>
@@ -3981,7 +4029,7 @@ export default function App() {
               </div>
 
               {/* Right Column: Configuration & Coordinates Panel */}
-              <div className="w-80 shrink-0 bg-black brutal-border p-6 flex flex-col justify-between text-white brutal-shadow overflow-y-auto m-2">
+              <div className="w-80 shrink-0 bg-[var(--color-neo-surface)] p-6 flex flex-col justify-between text-white overflow-y-auto custom-scrollbar">
                 <div className="space-y-6">
                   
                   {/* Image Info & Meta */}
@@ -4026,20 +4074,29 @@ export default function App() {
                   </div>
 
                   {/* Batch Sync Coordinates Checkbox */}
-                  <div className="space-y-2 pt-2 border-t-2 border-[var(--color-neo-surface)]">
-                    <label className="flex items-center gap-3 cursor-pointer select-none py-1 group">
-                      <input 
-                        type="checkbox"
-                        checked={cropperSyncBox}
-                        disabled={!cropperFile}
-                        onChange={(e) => setCropperSyncBox(e.target.checked)}
-                        className="w-4 h-4 brutal-border bg-[var(--color-neo-surface)] accent-[var(--color-neo-lime)] cursor-pointer disabled:opacity-30 appearance-none checked:bg-[var(--color-neo-lime)]"
-                      />
-                      <div className="text-left">
-                        <div className="text-[10px] font-black text-[var(--color-neo-white)] font-[Montserrat] uppercase tracking-wide group-hover:text-white transition-colors">Lock Coordinates Across Files</div>
-                        <div className="text-[8px] text-[var(--color-neo-purple)] font-[Inter] font-bold uppercase leading-tight mt-1">Apply this crop box exactly to other drawings when switching in the sidebar list.</div>
+                  <div className="space-y-2 pt-4 border-t border-[var(--color-neo-bg)]">
+                    <button 
+                      type="button"
+                      disabled={!cropperFile}
+                      onClick={() => setCropperSyncBox(!cropperSyncBox)}
+                      className={`w-full text-left brutal-border p-4 transition-all disabled:opacity-50 select-none group ${
+                        cropperSyncBox 
+                          ? 'bg-[var(--color-neo-lime)] text-black brutal-shadow' 
+                          : 'bg-[var(--color-neo-bg)] text-[var(--color-neo-white)] hover:bg-white hover:text-black brutal-shadow-hover'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-[10px] font-black font-[Montserrat] uppercase tracking-wide">
+                          Lock Coordinates
+                        </div>
+                        <div className={`w-8 h-4 brutal-border flex items-center p-0.5 ${cropperSyncBox ? 'bg-white' : 'bg-[var(--color-neo-surface)]'}`}>
+                          <div className={`w-2 h-2 brutal-border bg-black transition-transform ${cropperSyncBox ? 'translate-x-3.5' : ''}`}></div>
+                        </div>
                       </div>
-                    </label>
+                      <div className={`text-[8px] font-[Inter] font-bold uppercase leading-tight ${cropperSyncBox ? 'text-black' : 'text-[var(--color-neo-purple)] group-hover:text-black'}`}>
+                        Apply this crop box exactly to other drawings when switching in the sidebar list.
+                      </div>
+                    </button>
                   </div>
 
                   {/* High-Precision Crop Coordinates */}
