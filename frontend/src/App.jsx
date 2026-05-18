@@ -1112,7 +1112,7 @@ export default function App() {
       }
   };
 
-  // Tool 5: PDF to Image Converter Logic
+  // Tool 5: Document/Image to Image Converter Logic
   const handleLinkInputDir = async () => {
       if (!window.showDirectoryPicker) {
           alert("Your browser does not support the File System Access API directory pickers. Please use the quick drag-and-drop single file upload fallback.");
@@ -1123,19 +1123,26 @@ export default function App() {
           setConverterInputDirHandle(handle);
           setConverterLogs(prev => [...prev, `[INFO] Scanned input directory: "${handle.name}"`]);
           
-          const pdfs = [];
+          const files = [];
           for await (const entry of handle.values()) {
-              if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf')) {
-                  pdfs.push(entry);
+              const nameLower = entry.name.toLowerCase();
+              if (entry.kind === 'file' && (
+                  nameLower.endsWith('.pdf') ||
+                  nameLower.endsWith('.jpg') ||
+                  nameLower.endsWith('.jpeg') ||
+                  nameLower.endsWith('.png') ||
+                  nameLower.endsWith('.webp')
+              )) {
+                  files.push(entry);
               }
           }
           
           // Sort naturally
-          pdfs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+          files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
           
-          setConverterFilesList(pdfs);
-          setSelectedPdfNames(pdfs.map(p => p.name));
-          setConverterLogs(prev => [...prev, `[INFO] Found ${pdfs.length} drawing PDF file(s) in directory.`]);
+          setConverterFilesList(files);
+          setSelectedPdfNames(files.map(p => p.name));
+          setConverterLogs(prev => [...prev, `[INFO] Found ${files.length} drawing/image file(s) in directory.`]);
       } catch (err) {
           console.error(err);
           setConverterLogs(prev => [...prev, `[ERROR] Directory scan failed: ${err.message}`]);
@@ -1161,7 +1168,7 @@ export default function App() {
       const selected = e.target.files[0];
       if (!selected) return;
       setConverterSingleFile(selected);
-      setConverterLogs(prev => [...prev, `[INFO] Loaded individual drawing: "${selected.name}" (${(selected.size / 1024 / 1024).toFixed(2)} MB)`]);
+      setConverterLogs(prev => [...prev, `[INFO] Loaded individual file: "${selected.name}" (${(selected.size / 1024 / 1024).toFixed(2)} MB)`]);
   };
 
   const handleConverterProcess = async () => {
@@ -1171,7 +1178,7 @@ export default function App() {
           : converterFilesList.filter(f => selectedPdfNames.includes(f.name));
 
       if (filesToProcess.length === 0) {
-          alert("Please select at least one drawing PDF package to convert.");
+          alert("Please select at least one drawing or image file to convert.");
           return;
       }
 
@@ -1204,24 +1211,37 @@ export default function App() {
           
           for (let fIdx = 0; fIdx < filesToProcess.length; fIdx++) {
               const fileEntry = filesToProcess[fIdx];
-              // Re-fetch fresh file object to index pages
+              const isPdf = fileEntry.name.toLowerCase().endsWith('.pdf');
               const fileObj = fileEntry.getFile ? await fileEntry.getFile() : fileEntry;
-              const arrayBuffer = await fileObj.arrayBuffer();
-              const pdfDoc = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-              totalPages += pdfDoc.numPages;
               
-              filesMetadata.push({
-                  entry: fileEntry,
-                  name: fileEntry.name,
-                  baseName: fileEntry.name.replace(/\.[^/.]+$/, ""),
-                  numPages: pdfDoc.numPages
-              });
-              
-              // Clean up immediately to release file systems backing store locks
-              await pdfDoc.destroy();
+              if (isPdf) {
+                  const arrayBuffer = await fileObj.arrayBuffer();
+                  const pdfDoc = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+                  totalPages += pdfDoc.numPages;
+                  
+                  filesMetadata.push({
+                      entry: fileEntry,
+                      name: fileEntry.name,
+                      baseName: fileEntry.name.replace(/\.[^/.]+$/, ""),
+                      numPages: pdfDoc.numPages,
+                      isPdf: true
+                  });
+                  
+                  // Clean up immediately to release file systems backing store locks
+                  await pdfDoc.destroy();
+              } else {
+                  totalPages += 1;
+                  filesMetadata.push({
+                      entry: fileEntry,
+                      name: fileEntry.name,
+                      baseName: fileEntry.name.replace(/\.[^/.]+$/, ""),
+                      numPages: 1,
+                      isPdf: false
+                  });
+              }
           }
 
-          setConverterLogs(prev => [...prev, `[INFO] Total pages to render: ${totalPages} sheets across ${filesMetadata.length} document(s).`]);
+          setConverterLogs(prev => [...prev, `[INFO] Total rendering queue size: ${totalPages} item(s) across ${filesMetadata.length} file(s).`]);
 
           const zip = new JSZip();
           const startTime = Date.now();
@@ -1229,25 +1249,81 @@ export default function App() {
 
           for (let dIdx = 0; dIdx < filesMetadata.length; dIdx++) {
               const meta = filesMetadata[dIdx];
-              setConverterLogs(prev => [...prev, `[CONVERTING] "${meta.name}" (${meta.numPages} sheets)...`]);
+              setConverterLogs(prev => [...prev, `[CONVERTING] "${meta.name}"...`]);
 
-              // Re-acquire fresh File and ArrayBuffer to bypass Chromium stale handle cache invalidations
               const freshFileObj = meta.entry.getFile ? await meta.entry.getFile() : meta.entry;
-              const freshArrayBuffer = await freshFileObj.arrayBuffer();
-              const pdfDoc = await pdfjs.getDocument({ data: freshArrayBuffer }).promise;
 
-              for (let pIdx = 1; pIdx <= meta.numPages; pIdx++) {
-                  const page = await pdfDoc.getPage(pIdx);
-                  // Render at target resolution scale
-                  const viewport = page.getViewport({ scale: converterScale });
-                  
+              if (meta.isPdf) {
+                  const freshArrayBuffer = await freshFileObj.arrayBuffer();
+                  const pdfDoc = await pdfjs.getDocument({ data: freshArrayBuffer }).promise;
+
+                  for (let pIdx = 1; pIdx <= meta.numPages; pIdx++) {
+                      const page = await pdfDoc.getPage(pIdx);
+                      const viewport = page.getViewport({ scale: converterScale });
+                      
+                      const canvas = document.createElement('canvas');
+                      canvas.width = viewport.width;
+                      canvas.height = viewport.height;
+                      const ctx = canvas.getContext('2d');
+                      
+                      await page.render({ canvasContext: ctx, viewport }).promise;
+                      
+                      const mimeType = converterFormat === 'png' 
+                          ? 'image/png' 
+                          : converterFormat === 'jpeg' 
+                              ? 'image/jpeg' 
+                              : 'image/webp';
+                              
+                      const qualityVal = converterQuality / 100;
+                      const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, qualityVal));
+                      
+                      if (blob) {
+                          const ext = converterFormat;
+                          const outputFileName = `${meta.baseName}_page_${pIdx}.${ext}`;
+                          
+                          if (converterOutputDirHandle) {
+                              const fileHandle = await converterOutputDirHandle.getFileHandle(outputFileName, { create: true });
+                              const writable = await fileHandle.createWritable();
+                              await writable.write(blob);
+                              await writable.close();
+                              setConverterLogs(prev => [...prev, `[SAVED] Stored "${outputFileName}" to output directory.`]);
+                          } else {
+                              zip.file(outputFileName, blob);
+                              setConverterLogs(prev => [...prev, `[RENDERED] Packed "${outputFileName}" into ZIP.`]);
+                          }
+                      }
+
+                      renderedCount++;
+                      setConverterProgress(Math.round((renderedCount / totalPages) * 100));
+                      
+                      const elapsedSec = (Date.now() - startTime) / 1000;
+                      const pagesPerSec = (renderedCount / (elapsedSec || 0.1)).toFixed(1);
+                      setConverterSpeed({ pages: renderedCount, speed: pagesPerSec });
+                  }
+
+                  await pdfDoc.destroy();
+              } else {
+                  // It's an image file
+                  const imgUrl = URL.createObjectURL(freshFileObj);
+                  const img = new Image();
+                  img.src = imgUrl;
+
+                  await new Promise((resolve, reject) => {
+                      img.onload = resolve;
+                      img.onerror = () => reject(new Error(`Failed to load image "${meta.name}"`));
+                  });
+
+                  const targetWidth = img.naturalWidth * converterScale;
+                  const targetHeight = img.naturalHeight * converterScale;
+
                   const canvas = document.createElement('canvas');
-                  canvas.width = viewport.width;
-                  canvas.height = viewport.height;
+                  canvas.width = targetWidth;
+                  canvas.height = targetHeight;
                   const ctx = canvas.getContext('2d');
-                  
-                  await page.render({ canvasContext: ctx, viewport }).promise;
-                  
+                  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+                  URL.revokeObjectURL(imgUrl);
+
                   const mimeType = converterFormat === 'png' 
                       ? 'image/png' 
                       : converterFormat === 'jpeg' 
@@ -1256,10 +1332,10 @@ export default function App() {
                           
                   const qualityVal = converterQuality / 100;
                   const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, qualityVal));
-                  
+
                   if (blob) {
                       const ext = converterFormat;
-                      const outputFileName = `${meta.baseName}_page_${pIdx}.${ext}`;
+                      const outputFileName = `${meta.baseName}.${ext}`;
                       
                       if (converterOutputDirHandle) {
                           const fileHandle = await converterOutputDirHandle.getFileHandle(outputFileName, { create: true });
@@ -1280,9 +1356,6 @@ export default function App() {
                   const pagesPerSec = (renderedCount / (elapsedSec || 0.1)).toFixed(1);
                   setConverterSpeed({ pages: renderedCount, speed: pagesPerSec });
               }
-
-              // Destroy worker and release file buffer
-              await pdfDoc.destroy();
           }
 
           if (!converterOutputDirHandle) {
@@ -1295,7 +1368,7 @@ export default function App() {
               link.click();
               setConverterLogs(prev => [...prev, `[SUCCESS] Batch conversion completed. Downloader triggered.`]);
           } else {
-              setConverterLogs(prev => [...prev, `[SUCCESS] All ${renderedCount} pages successfully written directly to local folder.`]);
+              setConverterLogs(prev => [...prev, `[SUCCESS] All ${renderedCount} pages/images successfully written directly to local folder.`]);
           }
 
       } catch (err) {
@@ -3350,7 +3423,7 @@ export default function App() {
 
                 {/* 1. Input folder picker */}
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-[var(--color-neo-white)] font-[Montserrat] uppercase tracking-wider">1. Input PDF Location</label>
+                  <label className="text-[10px] font-black text-[var(--color-neo-white)] font-[Montserrat] uppercase tracking-wider">1. Input PDF / Image Location</label>
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={handleLinkInputDir}
@@ -3361,7 +3434,7 @@ export default function App() {
                       }`}
                     >
                       <i className={`bi ${converterInputDirHandle ? 'bi-folder-check' : 'bi-folder-plus'} text-lg`}></i>
-                      <span>{converterInputDirHandle ? `Scanned: ${converterInputDirHandle.name}` : 'Link Input PDF Folder'}</span>
+                      <span>{converterInputDirHandle ? `Scanned: ${converterInputDirHandle.name}` : 'Link Input Folder'}</span>
                     </button>
 
                     {/* Standard fallback drag & drop upload */}
@@ -3369,21 +3442,21 @@ export default function App() {
                       <div className="relative brutal-border bg-[var(--color-neo-bg)] p-4 brutal-shadow-hover group flex flex-col items-center justify-center text-center cursor-pointer mt-2">
                         <input 
                           type="file" 
-                          accept=".pdf" 
+                          accept=".pdf,.jpg,.jpeg,.png,.webp" 
                           onChange={handleConverterFileSelect}
                           className="absolute inset-0 opacity-0 cursor-pointer"
                         />
-                        <i className="bi bi-file-earmark-pdf text-[var(--color-neo-purple)] text-xl group-hover:scale-110 transition-transform"></i>
-                        <span className="text-[10px] font-bold text-white font-[Inter] mt-2 uppercase tracking-wide">Quick Individual PDF</span>
+                        <i className={`bi ${converterSingleFile && !converterSingleFile.name.toLowerCase().endsWith('.pdf') ? 'bi-file-earmark-image' : 'bi-file-earmark-pdf'} text-[var(--color-neo-purple)] text-xl group-hover:scale-110 transition-transform`}></i>
+                        <span className="text-[10px] font-bold text-white font-[Inter] mt-2 uppercase tracking-wide">Quick Individual File</span>
                         <span className="text-[9px] text-[var(--color-neo-white)] font-[Inter] font-bold uppercase tracking-wider px-2 mt-1 truncate max-w-full">
-                          {converterSingleFile ? converterSingleFile.name : 'Choose or drop blueprint PDF'}
+                          {converterSingleFile ? converterSingleFile.name : 'Choose or drop PDF or Image file'}
                         </span>
                       </div>
                     )}
                     
                     {converterSingleFile && (
                       <button
-                        onClick={() => { setConverterSingleFile(null); setConverterLogs(prev => [...prev, '[INFO] Cleared quick individual PDF.']); }}
+                        onClick={() => { setConverterSingleFile(null); setConverterLogs(prev => [...prev, '[INFO] Cleared quick individual file.']); }}
                         className="w-full text-center py-2 text-[10px] font-bold font-[Inter] text-[var(--color-neo-pink)] hover:text-white hover:bg-[var(--color-neo-pink)] brutal-border uppercase tracking-widest mt-2"
                       >
                         Clear Quick File
@@ -3523,12 +3596,12 @@ export default function App() {
                   <div className="flex items-center justify-between border-b-4 border-black pb-4 mb-4 shrink-0">
                     <div>
                       <h4 className="text-sm font-black text-white font-[Montserrat] uppercase tracking-tighter">
-                        {converterSingleFile ? 'Quick Convert Single File' : 'Scanned Drawing Package Queue'}
+                        {converterSingleFile ? 'Quick Convert Single File' : 'Scanned Files Queue'}
                       </h4>
                       <p className="text-[10px] text-[var(--color-neo-pink)] font-[Inter] font-bold mt-1 text-left uppercase">
                         {converterSingleFile 
-                          ? 'Converting single local PDF upload.'
-                          : `Select drawing packages to convert (${selectedPdfNames.length} of ${converterFilesList.length} checked)`}
+                          ? 'Converting single local file upload.'
+                          : `Select files to convert (${selectedPdfNames.length} of ${converterFilesList.length} checked)`}
                       </p>
                     </div>
                     
@@ -3557,7 +3630,7 @@ export default function App() {
                   <div className="flex-1 overflow-y-auto min-h-0 pr-2">
                     {converterSingleFile ? (
                       <div className="flex items-center gap-4 p-8 bg-[var(--color-neo-bg)] brutal-border justify-center text-center py-12">
-                        <i className="bi bi-file-earmark-pdf text-5xl text-[var(--color-neo-purple)]"></i>
+                        <i className={`bi ${converterSingleFile.name.toLowerCase().endsWith('.pdf') ? 'bi-file-earmark-pdf' : 'bi-file-earmark-image'} text-5xl text-[var(--color-neo-purple)]`}></i>
                         <div className="text-left space-y-2">
                           <div className="text-sm font-black text-white font-[Inter] truncate max-w-sm uppercase">{converterSingleFile.name}</div>
                           <div className="text-[10px] text-[var(--color-neo-white)] font-[Inter] font-bold uppercase">
@@ -3569,6 +3642,7 @@ export default function App() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
                         {converterFilesList.map(entry => {
                           const isChecked = selectedPdfNames.includes(entry.name);
+                          const isPdf = entry.name.toLowerCase().endsWith('.pdf');
                           return (
                             <div
                               key={entry.name}
@@ -3600,7 +3674,7 @@ export default function App() {
                                   {entry.name}
                                 </h5>
                                 <p className={`text-[9px] font-[Inter] font-bold uppercase leading-none ${isChecked ? 'text-black opacity-80' : 'text-[var(--color-neo-pink)]'}`}>
-                                  Blueprint Drawing Package • PDF Format
+                                  {isPdf ? 'Blueprint Drawing Package • PDF Format' : 'Image Drawing/File • Raster Format'}
                                 </p>
                               </div>
                             </div>
@@ -3613,9 +3687,9 @@ export default function App() {
                           <i className="bi bi-folder-x text-3xl animate-pulse"></i>
                         </div>
                         <div className="space-y-2">
-                          <h5 className="text-sm font-black text-white font-[Montserrat] uppercase tracking-tighter">No Drawings Scanned Yet</h5>
+                          <h5 className="text-sm font-black text-white font-[Montserrat] uppercase tracking-tighter">No Files Scanned Yet</h5>
                           <p className="text-[10px] text-[var(--color-neo-pink)] font-bold max-w-sm leading-relaxed font-[Inter] uppercase">
-                            Link an input PDF directory to list drawings, or choose a single blueprint package to begin conversion.
+                            Link an input directory to list PDF/image drawings, or choose a single document package to begin conversion.
                           </p>
                         </div>
                       </div>
