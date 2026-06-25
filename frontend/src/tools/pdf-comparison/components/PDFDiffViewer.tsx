@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { loadPdfJs } from "../utils/pdfHelper";
-import { computeVisualDiff } from "../utils/diff";
 import { ComparisonMode, PDFDocumentInfo } from "../types";
 import { FloatingControls } from "./FloatingControls";
-import { TextDiffPanel } from "./TextDiffPanel";
 import {
   FileText,
   Sparkles,
@@ -25,12 +23,15 @@ import {
   X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { saveSession, loadSession, clearSession } from "../utils/sessionCache";
+import { RestoreSessionModal } from "./RestoreSessionModal";
 
 export const PDFDiffViewer: React.FC = () => {
   // Library loaded state
   const [pdfjs, setPdfjs] = useState<any>(null);
   const [loadingLib, setLoadingLib] = useState(true);
   const [libError, setLibError] = useState<string | null>(null);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
 
   // File States
   const [fileA, setFileA] = useState<File | null>(null);
@@ -45,24 +46,24 @@ export const PDFDiffViewer: React.FC = () => {
   const [pageBOffset, setPageBOffset] = useState<number>(0); // manual page offset if unsynced
   const [zoom, setZoom] = useState<number>(1.25);
   const [mode, setMode] = useState<ComparisonMode>("swipe-slider");
-  const [activeTab, setActiveTab] = useState<"visual" | "text">("visual");
 
   // Render & Diff Canvases
   const canvasRefA = useRef<HTMLCanvasElement>(null);
   const canvasRefB = useRef<HTMLCanvasElement>(null);
-  const canvasRefDiff = useRef<HTMLCanvasElement>(null);
   const renderTaskRefA = useRef<any>(null);
   const renderTaskRefB = useRef<any>(null);
 
-  // Extracted plain texts
-  const [textA, setTextA] = useState<string>("");
-  const [textB, setTextB] = useState<string>("");
+
 
   // Swipe slider state
   const [sliderPosition, setSliderPosition] = useState<number>(50);
   const [isDraggingSlider, setIsDraggingSlider] = useState<boolean>(false);
   const [overlayOpacity, setOverlayOpacity] = useState<number>(0.5);
   const sliderContainerRef = useRef<HTMLDivElement>(null);
+
+  // Annotation visibility
+  const [showAnnotationsA, setShowAnnotationsA] = useState<boolean>(true);
+  const [showAnnotationsB, setShowAnnotationsB] = useState<boolean>(true);
 
   // Panning & Keyboard states
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -126,11 +127,7 @@ export const PDFDiffViewer: React.FC = () => {
     }
   };
 
-  // Visual Diff stats
-  const [visualDiffStats, setVisualDiffStats] = useState<{
-    diffPixelCount: number;
-    diffPercentage: number;
-  }>({ diffPixelCount: 0, diffPercentage: 0 });
+
 
   // Load PDF.js library on mount
   useEffect(() => {
@@ -147,6 +144,36 @@ export const PDFDiffViewer: React.FC = () => {
         setLoadingLib(false);
       });
   }, []);
+
+  // Check for previous session
+  useEffect(() => {
+    loadSession().then((session) => {
+      if (session && (session.fileA || session.fileB)) {
+        setShowRestoreModal(true);
+      }
+    });
+  }, []);
+
+  const handleRestoreSession = async () => {
+    const session = await loadSession();
+    if (session) {
+      if (session.fileA) setFileA(session.fileA);
+      if (session.fileB) setFileB(session.fileB);
+    }
+    setShowRestoreModal(false);
+  };
+
+  const handleDiscardSession = async () => {
+    await clearSession();
+    setShowRestoreModal(false);
+  };
+
+  // Save session when files change
+  useEffect(() => {
+    if (fileA || fileB) {
+      saveSession(fileA, fileB);
+    }
+  }, [fileA, fileB]);
 
   // Handle Document Loading A
   useEffect(() => {
@@ -289,6 +316,7 @@ export const PDFDiffViewer: React.FC = () => {
               const renderTask = pageA.render({
                 canvasContext: ctxA,
                 viewport: viewportA,
+                annotationMode: showAnnotationsA ? 1 : 0,
               });
               renderTaskRefA.current = renderTask;
               await renderTask.promise;
@@ -296,9 +324,7 @@ export const PDFDiffViewer: React.FC = () => {
             }
           }
 
-          // Local text extraction
-          const extractedTextA = await extractTextContent(pageA);
-          if (active) setTextA(extractedTextA);
+
         } catch (err: any) {
           if (err?.name !== "RenderingCancelledException") {
             console.error("Error rendering page A:", err);
@@ -336,6 +362,7 @@ export const PDFDiffViewer: React.FC = () => {
               const renderTask = pageB.render({
                 canvasContext: ctxB,
                 viewport: viewportB,
+                annotationMode: showAnnotationsB ? 1 : 0,
               });
               renderTaskRefB.current = renderTask;
               await renderTask.promise;
@@ -343,9 +370,7 @@ export const PDFDiffViewer: React.FC = () => {
             }
           }
 
-          // Local text extraction
-          const extractedTextB = await extractTextContent(pageB);
-          if (active) setTextB(extractedTextB);
+
         } catch (err: any) {
           if (err?.name !== "RenderingCancelledException") {
             console.error("Error rendering page B:", err);
@@ -353,35 +378,6 @@ export const PDFDiffViewer: React.FC = () => {
         }
       }
 
-      // Render difference map if both rendered successfully and same dimensions
-      if (
-        docAInfo &&
-        docBInfo &&
-        canvasRefA.current &&
-        canvasRefB.current &&
-        canvasRefDiff.current &&
-        active
-      ) {
-        const canvasA = canvasRefA.current;
-        const canvasB = canvasRefB.current;
-        const canvasDiff = canvasRefDiff.current;
-
-        // Ensure diff canvas matches dimensions (using the larger of the two to prevent clipping)
-        const diffW = Math.max(widthA, widthB);
-        const diffH = Math.max(heightA, heightB);
-
-        canvasDiff.width = diffW;
-        canvasDiff.height = diffH;
-
-        const ctxA = canvasA.getContext("2d");
-        const ctxB = canvasB.getContext("2d");
-        const ctxDiff = canvasDiff.getContext("2d");
-
-        if (ctxA && ctxB && ctxDiff) {
-          const stats = computeVisualDiff(ctxA, ctxB, ctxDiff, diffW, diffH);
-          if (active) setVisualDiffStats(stats);
-        }
-      }
     };
 
     renderPages();
@@ -409,7 +405,8 @@ export const PDFDiffViewer: React.FC = () => {
     syncPages,
     pageBOffset,
     mode,
-    activeTab,
+    showAnnotationsA,
+    showAnnotationsB,
   ]);
 
   // Global Keyboard Shortcuts
@@ -428,10 +425,20 @@ export const PDFDiffViewer: React.FC = () => {
         e.preventDefault();
       }
 
+      if (e.ctrlKey && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        setZoom((z) => Math.min(3.0, z + 0.25));
+        return;
+      }
+      if (e.ctrlKey && e.key === "-") {
+        e.preventDefault();
+        setZoom((z) => Math.max(0.5, z - 0.25));
+        return;
+      }
+
       if (e.key === "1") setMode("side-by-side");
       if (e.key === "2") setMode("swipe-slider");
-      if (e.key === "3") setMode("diff-map");
-      if (e.key === "4") setMode("overlay");
+      if (e.key === "3") setMode("overlay");
 
       const maxP = Math.max(docAInfo?.numPages || 1, docBInfo?.numPages || 1);
       if (e.key === "ArrowLeft") {
@@ -569,147 +576,14 @@ export const PDFDiffViewer: React.FC = () => {
         className="hidden"
       />
 
+      <RestoreSessionModal
+        isOpen={showRestoreModal}
+        onRestore={handleRestoreSession}
+        onDiscard={handleDiscardSession}
+      />
+
       {/* Main Sandbox Container Card (fully screen-sized layout) */}
       <div className="relative w-full h-full overflow-hidden flex flex-col flex-1 bg-[var(--color-neo-bg)]">
-        {/* Top Panel Controls */}
-        <div className="px-5 py-3 border-b-4 border-black bg-[var(--color-neo-surface)] brutal-shadow flex flex-wrap items-center justify-between gap-4 select-none z-10">
-          {/* Docked Document Uploaders & Linked status */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 bg-[var(--color-neo-surface)] brutal-border brutal-shadow p-1 rounded-none border border-black">
-              {/* Docked Original Document Selector */}
-              <button
-                onClick={() => fileInputRefA.current?.click()}
-                className={`px-2.5 py-1.5 rounded-none text-xs font-bold uppercase flex items-center gap-2 transition-all cursor-pointer max-w-[150px] border-2 border-transparent ${ fileA ? "bg-[var(--color-neo-lime)] text-black brutal-border brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:text-black hover:bg-white" }`}
-                title={
-                  fileA
-                    ? `Original Document (A): ${fileA.name}`
-                    : "Upload Original Document (A)"
-                }
-              >
-                <FileText className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate text-[11px]">
-                  {fileA ? fileA.name : "Upload Original (A)"}
-                </span>
-              </button>
-
-              <span className="text-[var(--color-neo-white)] font-black uppercase text-xs px-1 select-none">➔</span>
-
-              {/* Docked Revised Document Selector */}
-              <button
-                onClick={() => fileInputRefB.current?.click()}
-                className={`px-2.5 py-1.5 rounded-none text-xs font-bold uppercase flex items-center gap-2 transition-all cursor-pointer max-w-[150px] border-2 border-transparent ${ fileB ? "bg-[var(--color-neo-cyan)] text-black brutal-border brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:text-black hover:bg-white" }`}
-                title={
-                  fileB
-                    ? `Revised Document (B): ${fileB.name}`
-                    : "Upload Revised Document (B)"
-                }
-              >
-                <FileText className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate text-[11px]">
-                  {fileB ? fileB.name : "Upload Revised (B)"}
-                </span>
-              </button>
-            </div>
-
-            {/* Page Link Toggle (Visible only when documents are loaded) */}
-            {docAInfo && docBInfo && (
-              <button
-                onClick={() => setSyncPages(!syncPages)}
-                title={
-                  syncPages
-                    ? "Unlink Document Pages"
-                    : "Synchronize Document Pages"
-                }
-                className={`p-2 rounded-none border-2 text-xs font-bold uppercase flex items-center gap-1.5 transition-all cursor-pointer ${ syncPages ? "border-black bg-[var(--color-neo-lime)] text-black brutal-shadow" : "border-transparent text-[var(--color-neo-white)] hover:border-black hover:text-black hover:bg-white" }`}
-              >
-                {syncPages ? (
-                  <Link className="h-3.5 w-3.5" />
-                ) : (
-                  <Link2Off className="h-3.5 w-3.5" />
-                )}
-                <span className="hidden lg:inline text-[11px]">
-                  {syncPages ? "Linked Pages" : "Unlinked"}
-                </span>
-              </button>
-            )}
-          </div>
-
-          {/* View/Text Tab Selector (Visible only when documents are loaded) */}
-          {docAInfo && docBInfo && (
-            <div className="flex items-center gap-1 bg-[var(--color-neo-surface)] brutal-border brutal-shadow p-0.5 rounded-none border">
-              <button
-                onClick={() => setActiveTab("visual")}
-                className={`px-3 py-1.5 rounded-none text-xs font-bold uppercase transition-all flex items-center gap-1.5 cursor-pointer border-2 border-transparent ${ activeTab === "visual" ? "bg-[var(--color-neo-pink)] text-black brutal-shadow border-black" : "text-[var(--color-neo-white)] hover:border-black hover:text-black hover:bg-white" }`}
-              >
-                <Sliders className="h-3.5 w-3.5" />
-                <span className="text-[11px]">Visual Slider</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("text")}
-                className={`px-3 py-1.5 rounded-none text-xs font-bold uppercase transition-all flex items-center gap-1.5 cursor-pointer border-2 border-transparent ${ activeTab === "text" ? "bg-[var(--color-neo-pink)] text-black brutal-shadow border-black" : "text-[var(--color-neo-white)] hover:border-black hover:text-black hover:bg-white" }`}
-              >
-                <FontIcon className="h-3.5 w-3.5" />
-                <span className="text-[11px]">Text Diff</span>
-              </button>
-            </div>
-          )}
-
-          {/* Central Controls Strip (Visible only when documents are loaded) */}
-          {docAInfo && docBInfo ? (
-            <div className="flex items-center gap-3">
-              {/* Visual statistics */}
-              {mode === "diff-map" && activeTab === "visual" && (
-                <div className="text-[11px] font-black uppercase px-3 py-1.5 rounded-none bg-[var(--color-neo-pink)] border-2 border-black brutal-shadow text-black hidden xl:block">
-                  Diff: {visualDiffStats.diffPercentage}%
-                </div>
-              )}
-
-              {/* Mode controls */}
-              {activeTab === "visual" && (
-                <div className="flex items-center gap-0.5 bg-[var(--color-neo-surface)] brutal-border brutal-shadow p-0.5 rounded-none border">
-                  <button
-                    onClick={() => setMode("side-by-side")}
-                    className={`p-1.5 rounded-none transition-all cursor-pointer border-2 border-transparent ${ mode === "side-by-side" ? "bg-[var(--color-neo-purple)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:text-black hover:bg-white hover:border-black" }`}
-                    title="Side-by-Side"
-                  >
-                    <Columns className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setMode("swipe-slider")}
-                    className={`p-1.5 rounded-none transition-all cursor-pointer border-2 border-transparent ${ mode === "swipe-slider" ? "bg-[var(--color-neo-purple)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:text-black hover:bg-white hover:border-black" }`}
-                    title="Swipe Slider"
-                  >
-                    <SplitSquareHorizontal className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setMode("diff-map")}
-                    className={`p-1.5 rounded-none transition-all cursor-pointer border-2 border-transparent ${ mode === "diff-map" ? "bg-[var(--color-neo-purple)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:text-black hover:bg-white hover:border-black" }`}
-                    title="Difference Map"
-                  >
-                    <Layers className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setMode("overlay")}
-                    className={`p-1.5 rounded-none transition-all cursor-pointer border-2 border-transparent ${ mode === "overlay" ? "bg-[var(--color-neo-purple)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:text-black hover:bg-white hover:border-black" }`}
-                    title="Transparent Overlay"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* If documents are not loaded, show standard brand tag */
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] bg-[var(--color-neo-lime)] text-black brutal-btn font-black uppercase text-white font-extrabold px-1.5 py-0.5 rounded tracking-wider">
-                PDF
-              </span>
-              <span className="text-xs font-bold tracking-wider text-slate-300 font-[Montserrat] uppercase tracking-tighter">
-                V-DIFF ENGINE v2.4
-              </span>
-            </div>
-          )}
-        </div>
         {/* Core Display Body */}
         <div
           ref={scrollContainerRef}
@@ -719,9 +593,8 @@ export const PDFDiffViewer: React.FC = () => {
           onMouseLeave={handlePanEnd}
           className={`flex-1 relative overflow-auto bg-[var(--color-neo-bg)]${isSpaceHolding ? "cursor-grab" : ""}${isPanning ? "cursor-grabbing" : ""}`}
         >
-          {activeTab === "visual" ? (
-            <div className="relative min-w-max min-h-max p-6 flex flex-col items-center justify-center">
-              {!docAInfo || !docBInfo ? (
+          <div className="relative min-w-max min-h-max p-6 flex flex-col items-center justify-center">
+            {!docAInfo || !docBInfo ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl h-full p-4 items-center select-none">
                   {/* Document A Selector/Status */}
                   <div
@@ -807,21 +680,31 @@ export const PDFDiffViewer: React.FC = () => {
                   {mode === "side-by-side" && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-7xl">
                       {/* Document A panel */}
-                      <div className="flex flex-col items-center">
-                        <span className="text-[10px] bg-[var(--color-neo-lime)] text-black font-black uppercase tracking-wider px-2.5 py-1 rounded-none mb-2 select-none brutal-shadow brutal-border">
-                          Original Document (A)
-                        </span>
-                        <div className="border-4 border-black brutal-shadow rounded-none bg-white overflow-hidden max-w-full">
+                      <div className="flex flex-col items-center relative">
+                        <div className="relative border-4 border-black brutal-shadow rounded-none bg-white overflow-hidden max-w-full">
+                          <div
+                            onClick={() => fileInputRefA.current?.click()}
+                            className="absolute top-4 left-4 z-10 text-[10px] bg-[var(--color-neo-lime)] text-black font-black uppercase tracking-wider px-2.5 py-1 rounded-none select-none brutal-shadow brutal-border cursor-pointer hover:bg-white transition-colors group"
+                            title="Click to reupload"
+                          >
+                            <span className="group-hover:hidden">Original Document (A)</span>
+                            <span className="hidden group-hover:inline">Click to reupload A</span>
+                          </div>
                           <canvas ref={canvasRefA} />
                         </div>
                       </div>
 
                       {/* Document B panel */}
-                      <div className="flex flex-col items-center">
-                        <span className="text-[10px] bg-[var(--color-neo-cyan)] text-black font-black tracking-wider uppercase px-2.5 py-1 rounded-none mb-2 select-none brutal-shadow brutal-border">
-                          Revised Document (B)
-                        </span>
-                        <div className="border-4 border-black brutal-shadow rounded-none bg-white overflow-hidden max-w-full">
+                      <div className="flex flex-col items-center relative">
+                        <div className="relative border-4 border-black brutal-shadow rounded-none bg-white overflow-hidden max-w-full">
+                          <div
+                            onClick={() => fileInputRefB.current?.click()}
+                            className="absolute top-4 right-4 z-10 text-[10px] bg-[var(--color-neo-cyan)] text-black font-black uppercase tracking-wider px-2.5 py-1 rounded-none select-none brutal-shadow brutal-border cursor-pointer hover:bg-white transition-colors group"
+                            title="Click to reupload"
+                          >
+                            <span className="group-hover:hidden">Revised Document (B)</span>
+                            <span className="hidden group-hover:inline">Click to reupload B</span>
+                          </div>
                           <canvas ref={canvasRefB} />
                         </div>
                       </div>
@@ -850,7 +733,7 @@ export const PDFDiffViewer: React.FC = () => {
                       <div
                         className="absolute inset-0 overflow-hidden pointer-events-none"
                         style={{
-                          clipPath: `inset(0px ${100 - sliderPosition}% 0px 0px)`,
+                          clipPath: `inset(0px 0px 0px ${sliderPosition}%)`,
                         }}
                       >
                         <canvas
@@ -873,70 +756,26 @@ export const PDFDiffViewer: React.FC = () => {
                       </div>
 
                       {/* Quick Labels inside swipe container */}
-                      <div className="absolute left-4 top-4 bg-[var(--color-neo-surface)] text-[var(--color-neo-white)] text-[10px] font-black px-2 py-0.5 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow">
-                        Original Document A
+                      <div
+                        onClick={() => fileInputRefA.current?.click()}
+                        className="absolute left-4 top-4 bg-[var(--color-neo-surface)] text-[var(--color-neo-white)] text-[10px] font-black px-2 py-1 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow group cursor-pointer hover:bg-[var(--color-neo-lime)] hover:text-black transition-colors"
+                        title="Click to reupload"
+                      >
+                        <span className="group-hover:hidden">Original Document A</span>
+                        <span className="hidden group-hover:inline">Click to reupload A</span>
                       </div>
-                      <div className="absolute right-4 top-4 bg-[var(--color-neo-cyan)] text-black text-[10px] font-black px-2 py-0.5 rounded-none uppercase tracking-wider select-none z-10 brutal-shadow border-2 border-black">
-                        Revised Document B
+                      <div
+                        onClick={() => fileInputRefB.current?.click()}
+                        className="absolute right-4 top-4 bg-[var(--color-neo-cyan)] text-black text-[10px] font-black px-2 py-1 rounded-none uppercase tracking-wider select-none z-10 brutal-shadow border-2 border-black group cursor-pointer hover:bg-white transition-colors"
+                        title="Click to reupload"
+                      >
+                        <span className="group-hover:hidden">Revised Document B</span>
+                        <span className="hidden group-hover:inline">Click to reupload B</span>
                       </div>
                     </div>
                   )}
 
-                  {/* 3. Visual Difference Map View */}
-                  {mode === "diff-map" && (
-                    <div
-                      ref={sliderContainerRef}
-                      onMouseDown={handleMouseDown}
-                      onTouchStart={handleTouchStart}
-                      className="relative border-4 border-black brutal-shadow rounded-none overflow-hidden cursor-ew-resize select-none bg-[var(--color-neo-surface)] flex items-center justify-center"
-                      style={{
-                        width: canvasRefA.current?.width || "auto",
-                        height: canvasRefA.current?.height || "auto",
-                      }}
-                    >
-                      {/* Background Layer: PDF A (Original) */}
-                      <canvas
-                        ref={canvasRefA}
-                        className="absolute inset-0 block pointer-events-none"
-                      />
-
-                      {/* Foreground Layer: Calculated pixel difference canvas (clipped based on slider) */}
-                      <div
-                        className="absolute inset-0 overflow-hidden pointer-events-none"
-                        style={{
-                          clipPath: `inset(0px ${100 - sliderPosition}% 0px 0px)`,
-                        }}
-                      >
-                        <canvas
-                          ref={canvasRefDiff}
-                          className="absolute inset-0 block bg-[var(--color-neo-bg)]"
-                        />
-                      </div>
-
-                      {/* Drag handle */}
-                      <div
-                        className="absolute top-0 bottom-0 w-[4px] bg-black z-30"
-                        style={{ left: `${sliderPosition}%` }}
-                      >
-                        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-10 h-10 bg-[var(--color-neo-pink)] border-2 border-black rounded-none flex items-center justify-center cursor-ew-resize brutal-shadow hover:scale-105 active:scale-95 transition-all">
-                          <div className="flex gap-1">
-                            <div className="w-1 h-3 bg-black rounded-none"></div>
-                            <div className="w-1 h-3 bg-black rounded-none"></div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Overlay descriptive tags */}
-                      <div className="absolute left-4 top-4 bg-[var(--color-neo-surface)] text-[var(--color-neo-white)] text-[10px] font-black px-2 py-0.5 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow">
-                        Original Document A
-                      </div>
-                      <div className="absolute right-4 top-4 bg-[var(--color-neo-pink)] text-black text-[10px] font-black px-2 py-0.5 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow">
-                        Visual Differences (Highlights)
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 4. Overlay Transparent View */}
+                  {/* 3. Overlay Transparent View */}
                   {mode === "overlay" && (
                     <div
                       className="relative border-4 border-black brutal-shadow rounded-none overflow-hidden select-none bg-white flex items-center justify-center"
@@ -965,12 +804,21 @@ export const PDFDiffViewer: React.FC = () => {
                       </div>
 
                       {/* Overlay descriptive tags */}
-                      <div className="absolute left-4 top-4 bg-[var(--color-neo-surface)] text-[var(--color-neo-white)] text-[10px] font-black px-2 py-0.5 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow">
-                        Original Document A
+                      <div
+                        onClick={() => fileInputRefA.current?.click()}
+                        className="absolute left-4 top-4 bg-[var(--color-neo-surface)] text-[var(--color-neo-white)] text-[10px] font-black px-2 py-1 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow group cursor-pointer hover:bg-[var(--color-neo-lime)] hover:text-black transition-colors"
+                        title="Click to reupload"
+                      >
+                        <span className="group-hover:hidden">Original Document A</span>
+                        <span className="hidden group-hover:inline">Click to reupload A</span>
                       </div>
-                      <div className="absolute right-4 top-4 bg-[var(--color-neo-purple)] text-black text-[10px] font-black px-2 py-0.5 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow">
-                        Revised Document B (Opacity:{" "}
-                        {Math.round(overlayOpacity * 100)}%)
+                      <div
+                        onClick={() => fileInputRefB.current?.click()}
+                        className="absolute right-4 top-4 bg-[var(--color-neo-purple)] text-black text-[10px] font-black px-2 py-1 rounded-none uppercase tracking-wider select-none z-10 border-2 border-black brutal-shadow group cursor-pointer hover:bg-white transition-colors"
+                        title="Click to reupload"
+                      >
+                        <span className="group-hover:hidden">Revised Document B (Opacity: {Math.round(overlayOpacity * 100)}%)</span>
+                        <span className="hidden group-hover:inline">Click to reupload B</span>
                       </div>
                     </div>
                   )}
@@ -979,17 +827,10 @@ export const PDFDiffViewer: React.FC = () => {
                   <div className="hidden">
                     <canvas ref={canvasRefA} />
                     <canvas ref={canvasRefB} />
-                    <canvas ref={canvasRefDiff} />
                   </div>
                 </div>
               )}
             </div>
-          ) : (
-            // Logical text diff layer (offline LCS results)
-            <div className="w-full max-w-5xl h-full flex flex-col">
-              <TextDiffPanel textA={textA} textB={textB} />
-            </div>
-          )}
         </div>
 
         {/* Floating Controls Overlay (Always visible) */}
@@ -1005,6 +846,10 @@ export const PDFDiffViewer: React.FC = () => {
           onToggleFullscreen={() => {}}
           overlayOpacity={overlayOpacity}
           onOverlayOpacityChange={setOverlayOpacity}
+          showAnnotationsA={showAnnotationsA}
+          onShowAnnotationsAChange={setShowAnnotationsA}
+          showAnnotationsB={showAnnotationsB}
+          onShowAnnotationsBChange={setShowAnnotationsB}
         />
       </div>
     </div>

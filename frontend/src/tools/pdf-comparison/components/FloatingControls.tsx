@@ -11,6 +11,7 @@ import {
   SplitSquareHorizontal,
   Eye,
 } from "lucide-react";
+import { Type as FontIcon, Link, Link2Off, MessageSquare, MessageSquareOff } from "lucide-react";
 import { ComparisonMode } from "../types";
 import { motion } from "motion/react";
 
@@ -26,6 +27,11 @@ interface FloatingControlsProps {
   onToggleFullscreen: () => void;
   overlayOpacity?: number;
   onOverlayOpacityChange?: (opacity: number) => void;
+
+  showAnnotationsA: boolean;
+  onShowAnnotationsAChange: (show: boolean) => void;
+  showAnnotationsB: boolean;
+  onShowAnnotationsBChange: (show: boolean) => void;
 }
 
 export const FloatingControls: React.FC<FloatingControlsProps> = ({
@@ -40,6 +46,11 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
   onToggleFullscreen,
   overlayOpacity = 0.5,
   onOverlayOpacityChange,
+
+  showAnnotationsA,
+  onShowAnnotationsAChange,
+  showAnnotationsB,
+  onShowAnnotationsBChange,
 }) => {
   return (
     <motion.div
@@ -53,7 +64,7 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
         <button
           onClick={() => onModeChange("side-by-side")}
           title="Side-by-Side View"
-          className={`p-2 transition-all border-2 border-transparent ${ mode === "side-by-side" ? "bg-[var(--color-neo-cyan)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
+          className={`p-2 transition-all border-2 border-transparent ${ mode === "side-by-side" ? "bg-[var(--color-neo-pink)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
         >
           <Columns className="h-4 w-4" />
         </button>
@@ -61,23 +72,15 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
         <button
           onClick={() => onModeChange("swipe-slider")}
           title="Overlay Slider View"
-          className={`p-2 transition-all border-2 border-transparent ${ mode === "swipe-slider" ? "bg-[var(--color-neo-cyan)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
+          className={`p-2 transition-all border-2 border-transparent ${ mode === "swipe-slider" ? "bg-[var(--color-neo-pink)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
         >
           <SplitSquareHorizontal className="h-4 w-4" />
         </button>
 
         <button
-          onClick={() => onModeChange("diff-map")}
-          title="Visual Difference Map"
-          className={`p-2 transition-all border-2 border-transparent ${ mode === "diff-map" ? "bg-[var(--color-neo-cyan)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
-        >
-          <Layers className="h-4 w-4" />
-        </button>
-
-        <button
           onClick={() => onModeChange("overlay")}
           title="Transparent Overlay View"
-          className={`p-2 transition-all border-2 border-transparent ${ mode === "overlay" ? "bg-[var(--color-neo-cyan)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
+          className={`p-2 transition-all border-2 border-transparent ${ mode === "overlay" ? "bg-[var(--color-neo-pink)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
         >
           <Eye className="h-4 w-4" />
         </button>
@@ -95,8 +98,8 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
           <ChevronLeft className="h-4 w-4" />
         </button>
 
-        <span className="text-xs px-2 font-mono tracking-tight select-none min-w-[70px] text-center text-[var(--color-neo-white)]">
-          Page {currentPage} / {totalPages || 1}
+        <span className="text-xs px-2 font-mono tracking-tight select-none min-w-[50px] text-center text-[var(--color-neo-white)]">
+          {currentPage} / {totalPages || 1}
         </span>
 
         <button
@@ -105,6 +108,28 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
           className="p-1.5 border-2 border-transparent hover:border-black hover:bg-white hover:text-black text-[var(--color-neo-white)] disabled:opacity-40 transition-colors"
         >
           <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="h-6 w-1 bg-black mx-1 hidden sm:block" />
+
+      {/* Annotation Toggles */}
+      <div className="flex items-center gap-1 bg-[var(--color-neo-bg)] border-2 border-black p-1">
+        <button
+          onClick={() => onShowAnnotationsAChange(!showAnnotationsA)}
+          title={showAnnotationsA ? "Hide Annotations A" : "Show Annotations A"}
+          className={`px-2 py-1 transition-all border-2 border-transparent text-[10px] font-black uppercase flex items-center gap-1 ${ showAnnotationsA ? "bg-[var(--color-neo-lime)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
+        >
+          {showAnnotationsA ? <MessageSquare className="h-3.5 w-3.5" /> : <MessageSquareOff className="h-3.5 w-3.5" />}
+          A
+        </button>
+        <button
+          onClick={() => onShowAnnotationsBChange(!showAnnotationsB)}
+          title={showAnnotationsB ? "Hide Annotations B" : "Show Annotations B"}
+          className={`px-2 py-1 transition-all border-2 border-transparent text-[10px] font-black uppercase flex items-center gap-1 ${ showAnnotationsB ? "bg-[var(--color-neo-cyan)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
+        >
+          {showAnnotationsB ? <MessageSquare className="h-3.5 w-3.5" /> : <MessageSquareOff className="h-3.5 w-3.5" />}
+          B
         </button>
       </div>
 

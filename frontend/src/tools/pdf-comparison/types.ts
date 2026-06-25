@@ -1,4 +1,4 @@
-export type ComparisonMode = "side-by-side" | "swipe-slider" | "diff-map" | "overlay";
+export type ComparisonMode = "side-by-side" | "swipe-slider" | "overlay";
 
 export interface PDFDocumentInfo {
   name: string;
