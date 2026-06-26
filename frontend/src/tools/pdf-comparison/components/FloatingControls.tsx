@@ -32,6 +32,9 @@ interface FloatingControlsProps {
   onShowAnnotationsAChange: (show: boolean) => void;
   showAnnotationsB: boolean;
   onShowAnnotationsBChange: (show: boolean) => void;
+  
+  isAnnotationPanelOpen: boolean;
+  onToggleAnnotationPanel: () => void;
 }
 
 export const FloatingControls: React.FC<FloatingControlsProps> = ({
@@ -51,6 +54,9 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
   onShowAnnotationsAChange,
   showAnnotationsB,
   onShowAnnotationsBChange,
+
+  isAnnotationPanelOpen,
+  onToggleAnnotationPanel,
 }) => {
   return (
     <motion.div
@@ -130,6 +136,15 @@ export const FloatingControls: React.FC<FloatingControlsProps> = ({
         >
           {showAnnotationsB ? <MessageSquare className="h-3.5 w-3.5" /> : <MessageSquareOff className="h-3.5 w-3.5" />}
           B
+        </button>
+        <div className="w-px h-4 bg-gray-700 mx-1"></div>
+        <button
+          onClick={onToggleAnnotationPanel}
+          title={isAnnotationPanelOpen ? "Close Annotations Panel" : "Open Annotations Panel"}
+          className={`px-2 py-1 transition-all border-2 border-transparent text-[10px] font-black uppercase flex items-center gap-1 ${ isAnnotationPanelOpen ? "bg-[var(--color-neo-pink)] text-black border-black brutal-shadow" : "text-[var(--color-neo-white)] hover:border-black hover:bg-white hover:text-black" }`}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          List
         </button>
       </div>
 

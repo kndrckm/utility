@@ -15,3 +15,13 @@ export interface TextLineDiff {
   textA?: string;
   textB?: string;
 }
+
+export interface PDFAnnotation {
+  id: string;
+  subtype: string;
+  contents: string;
+  title?: string;
+  rect: number[];
+  color?: number[];
+  creationDate?: string;
+}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { loadPdfJs } from "../utils/pdfHelper";
-import { ComparisonMode, PDFDocumentInfo } from "../types";
+import { ComparisonMode, PDFDocumentInfo, PDFAnnotation } from "../types";
 import { FloatingControls } from "./FloatingControls";
 import {
   FileText,
@@ -21,6 +21,7 @@ import {
   Eye,
   Upload,
   X,
+  MessageSquare,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { saveSession, loadSession, clearSession } from "../utils/sessionCache";
@@ -46,6 +47,13 @@ export const PDFDiffViewer: React.FC = () => {
   const [pageBOffset, setPageBOffset] = useState<number>(0); // manual page offset if unsynced
   const [zoom, setZoom] = useState<number>(1.25);
   const [mode, setMode] = useState<ComparisonMode>("swipe-slider");
+
+  const [annotationsA, setAnnotationsA] = useState<PDFAnnotation[]>([]);
+  const [annotationsB, setAnnotationsB] = useState<PDFAnnotation[]>([]);
+  const [viewportA, setViewportA] = useState<any>(null);
+  const [viewportB, setViewportB] = useState<any>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [isAnnotationPanelOpen, setIsAnnotationPanelOpen] = useState<boolean>(false);
 
   // Render & Diff Canvases
   const canvasRefA = useRef<HTMLCanvasElement>(null);
@@ -295,6 +303,7 @@ export const PDFDiffViewer: React.FC = () => {
         try {
           pageA = await docAInfo.pdfDoc.getPage(pageNumA);
           const viewportA = pageA.getViewport({ scale: zoom });
+          if (active) setViewportA(viewportA);
 
           if (canvasRefA.current && active) {
             const canvasA = canvasRefA.current;
@@ -316,6 +325,7 @@ export const PDFDiffViewer: React.FC = () => {
               const renderTask = pageA.render({
                 canvasContext: ctxA,
                 viewport: viewportA,
+                intent: "display",
                 annotationMode: showAnnotationsA ? 1 : 0,
               });
               renderTaskRefA.current = renderTask;
@@ -324,6 +334,8 @@ export const PDFDiffViewer: React.FC = () => {
             }
           }
 
+          const annots = await pageA.getAnnotations();
+          if (active) setAnnotationsA(annots);
 
         } catch (err: any) {
           if (err?.name !== "RenderingCancelledException") {
@@ -341,6 +353,7 @@ export const PDFDiffViewer: React.FC = () => {
         try {
           pageB = await docBInfo.pdfDoc.getPage(pageNumB);
           const viewportB = pageB.getViewport({ scale: zoom });
+          if (active) setViewportB(viewportB);
 
           if (canvasRefB.current && active) {
             const canvasB = canvasRefB.current;
@@ -362,6 +375,7 @@ export const PDFDiffViewer: React.FC = () => {
               const renderTask = pageB.render({
                 canvasContext: ctxB,
                 viewport: viewportB,
+                intent: "display",
                 annotationMode: showAnnotationsB ? 1 : 0,
               });
               renderTaskRefB.current = renderTask;
@@ -370,6 +384,8 @@ export const PDFDiffViewer: React.FC = () => {
             }
           }
 
+          const annots = await pageB.getAnnotations();
+          if (active) setAnnotationsB(annots);
 
         } catch (err: any) {
           if (err?.name !== "RenderingCancelledException") {
@@ -425,13 +441,15 @@ export const PDFDiffViewer: React.FC = () => {
         e.preventDefault();
       }
 
-      if (e.ctrlKey && (e.key === "=" || e.key === "+")) {
+      if (e.ctrlKey && (e.key === "=" || e.key === "+" || e.code === "Equal" || e.code === "NumpadAdd")) {
         e.preventDefault();
+        e.stopPropagation();
         setZoom((z) => Math.min(3.0, z + 0.25));
         return;
       }
-      if (e.ctrlKey && e.key === "-") {
+      if (e.ctrlKey && (e.key === "-" || e.code === "Minus" || e.code === "NumpadSubtract")) {
         e.preventDefault();
+        e.stopPropagation();
         setZoom((z) => Math.max(0.5, z - 0.25));
         return;
       }
@@ -455,11 +473,11 @@ export const PDFDiffViewer: React.FC = () => {
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    window.addEventListener("keyup", handleKeyUp, { capture: true });
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keyup", handleKeyUp, { capture: true });
     };
   }, [docAInfo, docBInfo]);
 
@@ -549,6 +567,56 @@ export const PDFDiffViewer: React.FC = () => {
 
   // Page maximum count
   const maxPages = Math.max(docAInfo?.numPages || 1, docBInfo?.numPages || 1);
+
+  // Render Annotations Overlay
+  const renderAnnotationsOverlay = (
+    annotations: PDFAnnotation[],
+    viewport: any,
+    docLabel: "A" | "B"
+  ) => {
+    if (!viewport || !annotations.length) return null;
+
+    return (
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
+        {annotations.map((annot) => {
+          if (!annot.rect || annot.rect.length < 4) return null;
+
+          // PDF coordinates to Viewport (canvas) coordinates
+          const [x1, y1] = viewport.convertToViewportPoint(annot.rect[0], annot.rect[1]);
+          const [x2, y2] = viewport.convertToViewportPoint(annot.rect[2], annot.rect[3]);
+
+          const left = Math.min(x1, x2);
+          const top = Math.min(y1, y2);
+          const width = Math.abs(x1 - x2);
+          const height = Math.abs(y1 - y2);
+
+          const isSelected = selectedAnnotationId === annot.id;
+          const colorClass = docLabel === "A" ? "border-[var(--color-neo-lime)]" : "border-[var(--color-neo-cyan)]";
+          
+          return (
+            <div
+              key={annot.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedAnnotationId(annot.id);
+                setIsAnnotationPanelOpen(true);
+              }}
+              className={`absolute pointer-events-auto cursor-pointer transition-all ${
+                isSelected ? "border-4 bg-yellow-300/30 shadow-lg z-30" : `border-2 bg-yellow-100/10 hover:bg-yellow-200/20 ${colorClass}`
+              }`}
+              style={{
+                left: `${left}px`,
+                top: `${top}px`,
+                width: `${width}px`,
+                height: `${height}px`,
+              }}
+              title={annot.contents || annot.title || annot.subtype}
+            />
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="w-full h-full flex flex-col bg-[var(--color-neo-bg)]">
@@ -690,24 +758,29 @@ export const PDFDiffViewer: React.FC = () => {
                             <span className="group-hover:hidden">Original Document (A)</span>
                             <span className="hidden group-hover:inline">Click to reupload A</span>
                           </div>
-                          <canvas ref={canvasRefA} />
-                        </div>
+                          <canvas
+                            ref={canvasRefA}
+                            className="block pointer-events-none"
+                          />
+                        {renderAnnotationsOverlay(annotationsA, viewportA, "A")}
                       </div>
+                    </div>
 
-                      {/* Document B panel */}
-                      <div className="flex flex-col items-center relative">
-                        <div className="relative border-4 border-black brutal-shadow rounded-none bg-white overflow-hidden max-w-full">
-                          <div
-                            onClick={() => fileInputRefB.current?.click()}
-                            className="absolute top-4 right-4 z-10 text-[10px] bg-[var(--color-neo-cyan)] text-black font-black uppercase tracking-wider px-2.5 py-1 rounded-none select-none brutal-shadow brutal-border cursor-pointer hover:bg-white transition-colors group"
-                            title="Click to reupload"
-                          >
-                            <span className="group-hover:hidden">Revised Document (B)</span>
-                            <span className="hidden group-hover:inline">Click to reupload B</span>
-                          </div>
-                          <canvas ref={canvasRefB} />
+                    {/* Document B panel */}
+                    <div className="flex flex-col items-center relative">
+                      <div className="relative border-4 border-black brutal-shadow rounded-none bg-white overflow-hidden max-w-full">
+                        <div
+                          onClick={() => fileInputRefB.current?.click()}
+                          className="absolute top-4 right-4 z-10 text-[10px] bg-[var(--color-neo-cyan)] text-black font-black uppercase tracking-wider px-2.5 py-1 rounded-none select-none brutal-shadow brutal-border cursor-pointer hover:bg-white transition-colors group"
+                          title="Click to reupload"
+                        >
+                          <span className="group-hover:hidden">Revised Document (B)</span>
+                          <span className="hidden group-hover:inline">Click to reupload B</span>
                         </div>
+                        <canvas ref={canvasRefB} className="block pointer-events-none" />
+                        {renderAnnotationsOverlay(annotationsB, viewportB, "B")}
                       </div>
+                    </div>
                     </div>
                   )}
 
@@ -723,11 +796,11 @@ export const PDFDiffViewer: React.FC = () => {
                         height: canvasRefA.current?.height || "auto",
                       }}
                     >
-                      {/* Background Layer: PDF A */}
                       <canvas
                         ref={canvasRefA}
                         className="absolute inset-0 block pointer-events-none"
                       />
+                      {renderAnnotationsOverlay(annotationsA, viewportA, "A")}
 
                       {/* Foreground Layer: PDF B (clipped based on slider) */}
                       <div
@@ -738,8 +811,9 @@ export const PDFDiffViewer: React.FC = () => {
                       >
                         <canvas
                           ref={canvasRefB}
-                          className="absolute inset-0 block"
+                          className="absolute inset-0 block pointer-events-none"
                         />
+                        {renderAnnotationsOverlay(annotationsB, viewportB, "B")}
                       </div>
 
                       {/* Vertical Split Indicator / Drag handle */}
@@ -789,6 +863,7 @@ export const PDFDiffViewer: React.FC = () => {
                         ref={canvasRefA}
                         className="absolute inset-0 block pointer-events-none"
                       />
+                      {renderAnnotationsOverlay(annotationsA, viewportA, "A")}
 
                       {/* Foreground Layer: PDF B with transparency */}
                       <div
@@ -801,6 +876,7 @@ export const PDFDiffViewer: React.FC = () => {
                           ref={canvasRefB}
                           className="absolute inset-0 block mix-blend-multiply"
                         />
+                        {renderAnnotationsOverlay(annotationsB, viewportB, "B")}
                       </div>
 
                       {/* Overlay descriptive tags */}
@@ -830,10 +906,77 @@ export const PDFDiffViewer: React.FC = () => {
                   </div>
                 </div>
               )}
-            </div>
+          </div>
         </div>
 
+        {/* Annotations Right Panel */}
+        <AnimatePresence>
+          {isAnnotationPanelOpen && (
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              className="absolute right-0 top-0 h-full w-80 bg-[var(--color-neo-surface)] border-l-4 border-black brutal-shadow z-50 flex flex-col"
+            >
+              <div className="flex items-center justify-between p-4 border-b-4 border-black bg-[var(--color-neo-pink)] text-black">
+                <h3 className="font-black uppercase tracking-widest flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5" />
+                  Annotations
+                </h3>
+                <button
+                  onClick={() => setIsAnnotationPanelOpen(false)}
+                  className="hover:bg-black hover:text-white transition-colors p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-[var(--color-neo-bg)]">
+                {annotationsA.length === 0 && annotationsB.length === 0 ? (
+                  <div className="text-gray-500 font-mono text-sm font-bold uppercase p-4 text-center border-2 border-black border-dashed">No annotations found.</div>
+                ) : (
+                  <>
+                    {annotationsA.map((annot) => (
+                      <div
+                        key={annot.id}
+                        onClick={() => setSelectedAnnotationId(annot.id)}
+                        className={`p-3 border-2 border-black brutal-shadow bg-white cursor-pointer transition-all ${
+                          selectedAnnotationId === annot.id ? "bg-[var(--color-neo-lime)]" : "hover:-translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-[10px] bg-black text-[var(--color-neo-lime)] px-2 py-0.5 uppercase font-black tracking-wider">Doc A</span>
+                          <span className="text-[10px] text-gray-500 font-mono font-bold uppercase">{annot.subtype}</span>
+                        </div>
+                        {annot.title && <div className="font-bold text-sm mb-1">{annot.title}</div>}
+                        <div className="text-sm font-mono whitespace-pre-wrap">{annot.contents || "No textual content"}</div>
+                      </div>
+                    ))}
+                    {annotationsB.map((annot) => (
+                      <div
+                        key={annot.id}
+                        onClick={() => setSelectedAnnotationId(annot.id)}
+                        className={`p-3 border-2 border-black brutal-shadow bg-white cursor-pointer transition-all ${
+                          selectedAnnotationId === annot.id ? "bg-[var(--color-neo-cyan)]" : "hover:-translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-[10px] bg-black text-[var(--color-neo-cyan)] px-2 py-0.5 uppercase font-black tracking-wider">Doc B</span>
+                          <span className="text-[10px] text-gray-500 font-mono font-bold uppercase">{annot.subtype}</span>
+                        </div>
+                        {annot.title && <div className="font-bold text-sm mb-1">{annot.title}</div>}
+                        <div className="text-sm font-mono whitespace-pre-wrap">{annot.contents || "No textual content"}</div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Floating Controls Overlay (Always visible) */}
+
         <FloatingControls
           currentPage={currentPage}
           totalPages={maxPages}
